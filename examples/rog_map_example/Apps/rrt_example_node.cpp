@@ -1,37 +1,56 @@
+/**
+ * ROG-Map 示例：RRT* 路径搜索节点
+ *
+ * 功能：使用 ROG-Map 提供的地图进行 RRT* 路径搜索，
+ * 通过 RViz 的 "3D Nav Goal" 工具交互式设置起点和终点。
+ *
+ * RRT* 基于采样，适合高维空间和复杂环境，渐近最优。
+ *
+ * 使用方式：
+ * 1. roslaunch rog_map_example rrt_example.launch
+ * 2. 在 RViz 中按 G 键启用 3D Nav Goal
+ * 3. 点击两个点：第一个为起点（橙色），第二个为终点（绿色）
+ * 4. 每次点击两个点后自动执行路径搜索
+ */
+
 #include "rog_rrt/rog_rrt.hpp"
 
 
+/// 前向声明
 void rvizClickCallback(const geometry_msgs::PoseStampedConstPtr& msg);
+
+/// 发布带标签的点标记
 void publishPointWithText(const rog_map::Vec3f& p,
                           const std::string& text,
                           const rog_map::Color c = rog_map::Color::Green());
 
+/// 全局变量：RRT* 搜索器和 Marker 发布器
 rog_rrt::RRTStar::Ptr rog_rrt_ptr;
 ros::Publisher mkr_pub;
 
 int main(int argc, char** argv) {
+    /// 初始化ROS节点
     ros::init(argc, argv, "rm_node");
     ros::NodeHandle nh("~");
 
     pcl::console::setVerbosityLevel(pcl::console::L_ALWAYS);
 
-    /* 1. Creat a ROGMap ptr*/
+    /// 【1】创建 ROGMap 指针（地图模块）
     rog_map::ROGMap::Ptr rog_map_ptr = std::make_shared<rog_map::ROGMap>(nh);
 
-    /* 2. Creat a path search module and input the map ptr*/
+    /// 【2】创建 RRT* 路径搜索模块，传入地图指针
     rog_rrt_ptr = std::make_shared<rog_rrt::RRTStar>(nh, rog_map_ptr);
 
-    /* 3. Creat some interactive nodes */
+    /// 【3】创建交互节点：订阅RViz点击 + 发布MarkerArray
     ros::Subscriber rviz_click_sub = nh.subscribe("/goal", 1, &rvizClickCallback);
     mkr_pub = nh.advertise<visualization_msgs::MarkerArray>("visualization_marker_array", 1);
 
-    /* Publisher and subcriber */
+    /// 【4】启动异步Spinner
     ros::AsyncSpinner spinner(0);
     spinner.start();
     ros::Duration(1.0).sleep();
 
-    /* Run an example first*/
-    /* Run an example first*/
+    /// 【5】运行预置示例路径搜索
     rog_rrt::Vec3f start, goal;
     rog_rrt_ptr->getExampleStartGoal(start, goal);
 
@@ -50,9 +69,11 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+/// 发布带文本标签的点标记到 RViz
 void publishPointWithText(const rog_map::Vec3f& p,
                           const std::string& text,
                           const rog_map::Color c) {
+    // ===== 球体标记 =====
     visualization_msgs::Marker point_marker;
     point_marker.header.frame_id = "world";
     point_marker.header.stamp = ros::Time::now();
@@ -70,7 +91,7 @@ void publishPointWithText(const rog_map::Vec3f& p,
     point_marker.color = c;
     point_marker.color.a = 1.0;
 
-
+    // ===== 文本标签 =====
     visualization_msgs::Marker text_marker;
     text_marker.header.frame_id = "world";
     text_marker.header.stamp = ros::Time::now();
@@ -93,24 +114,28 @@ void publishPointWithText(const rog_map::Vec3f& p,
     mkr_pub.publish(marker_array);
 }
 
+/// RViz 点击回调
+/// 交替接收起点/终点，每两个点触发一次 RRT* 路径搜索
 void rvizClickCallback(const geometry_msgs::PoseStampedConstPtr& msg) {
     ROS_INFO("Note, the click height is set to 1.0 to ease the user interaction.");
     ROS_INFO("x: %f, y: %f, z: %f", msg->pose.position.x, msg->pose.position.y, 1.0);
     static rog_map::Vec3f start_pos, goal_pos;
     static bool is_start = true;
 
-    /// NOTE the click heigh is set to 1.0 to ease the user interaction in Rviz
     if (is_start) {
+        /// 第一个点 = 起点
         start_pos = rog_map::Vec3f(msg->pose.position.x, msg->pose.position.y, 1.0);
         is_start = false;
         publishPointWithText(start_pos, "start", rog_map::Color::Orange());
     }
     else {
+        /// 第二个点 = 终点，触发路径搜索
         goal_pos = rog_map::Vec3f(msg->pose.position.x, msg->pose.position.y, 1.0);
-
-        /* Two points got, start one plan */
         publishPointWithText(goal_pos, "goal", rog_map::Color::Green());
-        /* 1) set the searching settings */
+
+        /// 搜索标志位：
+        /// UNKNOWN_AS_FREE: 未知区域可通过（RRT*探索用）
+        /// ON_INF_MAP: 在膨胀地图上搜索
         int flag = rog_rrt::UNKNOWN_AS_FREE | rog_rrt::ON_INF_MAP;
         const auto ret = rog_rrt_ptr->pathSearch(start_pos, goal_pos, 0.1, flag);
         if (ret) {
